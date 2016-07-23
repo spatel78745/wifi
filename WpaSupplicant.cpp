@@ -67,15 +67,20 @@ vector<Network> WpaSupplicant::list_networks()
 
 	Network nw;
 	vector<Network> nw_list;
-	string network_id;
 
-	while(ss >> network_id >> nw.ssid >> nw.bssid >> nw.flags)
-	{
-		nw.network_id = stoi(network_id);
-		nw_list.push_back(nw);
-	}
+  while(getline(ss, str))
+  {
+    vector<string> fields = split(str, '\t');
 
-	return nw_list;
+    nw.network_id = stoi(fields[0]);
+    nw.ssid       = fields[1];
+    nw.bssid      = fields[2];
+    nw.flags      = fields[3];
+
+    nw_list.push_back(nw);
+  }
+
+  return nw_list;
 }
 
 Network WpaSupplicant::get_current_network()

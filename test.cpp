@@ -248,9 +248,6 @@ void test_split()
 
 int main(int argc, char *argv[])
 {
-  test_split();
-#if 0
 	Network nw = supp.get_current_network();
 	print_network(nw);
-#endif
 }
