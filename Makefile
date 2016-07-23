@@ -32,8 +32,8 @@ $(CONFD_DIR)/src/confd/build/include.mk:
 CONFD_FLAGS ?= --addloadpath $(CONFD_DIR)/etc/confd
 START_FLAGS ?=
 
-PROG	= cdbl
-SRC	= $(PROG).cpp
+PROG	= test
+SRC	= util.cpp test.cpp WpaSupplicant.cpp
 OBJS	= $(SRC:.cpp=.o)
 LIBS	+= -lcrypto
 
