@@ -83,6 +83,47 @@ static void print_config(const struct config& config)
 	cout << "----------" << endl;
 }
 
+void read_leaf(int cdbsock, const char *path, string& str)
+{
+	confd_value_t val;
+
+	int ret = cdb_get(cdbsock, &val, path);
+	if (ret == CONFD_OK)
+	{
+		str = (char *)CONFD_GET_BUFPTR(&val);
+		confd_free_value(&val);
+	}
+	else if (confd_errno == CONFD_ERR_NOEXISTS)
+	{
+		str.clear();
+	}
+	else
+	{
+		confd_fatal("cdb_get failed on %s: %s", path, confd_lasterr());
+	}
+}
+
+void read_leaf(int cdbsock, const char *path, int& n)
+{
+	confd_value_t val;
+
+	int ret = cdb_get(cdbsock, &val, path);
+	if (ret == CONFD_OK)
+	{
+		if      (val.type == C_INT32)      n = CONFD_GET_INT32(&val);
+		else if (val.type == C_ENUM_VALUE) n = CONFD_GET_ENUM_VALUE(&val);
+		else                              confd_fatal("Unexpected type: %d", val.type);
+	}
+	else if (confd_errno == CONFD_ERR_NOEXISTS)
+	{
+		n = 0;
+	}
+	else
+	{
+		confd_fatal("cdb_get failed on %s: %s", path, confd_lasterr());
+	}
+}
+
 static void read_config(int cdbsock, struct config& config)
 {
 	int ret;
@@ -97,24 +138,16 @@ static void read_config(int cdbsock, struct config& config)
 	{
 		confd_fatal("Cannot set namespace to wifi__ns: %s", confd_lasterr());
 	}
-
+#if 0
 	ret = cdb_get_enum_value(cdbsock, &new_config.mode, "/wifi/mode");
 	if (ret == CONFD_ERR && confd_errno != CONFD_ERR_NOEXISTS)
 	{
 		confd_fatal("cdb_get_enum_value failed on /wifi/mode: %s", confd_lasterr());
 	}
+#endif
 
-	confd_value_t val;
-
-	ret = cdb_get(cdbsock, &val, "wifi/station/ssid");
-	if (ret == CONFD_OK)
-	{
-		new_config.station.ssid = (char *)CONFD_GET_BUFPTR(&val);
-	}
-	else if (confd_errno != CONFD_ERR_NOEXISTS)
-	{
-		confd_fatal("cdb_get failed on /wifi/station/ssid: %s", confd_lasterr());
-	}
+	read_leaf(cdbsock, "wifi/station/ssid", new_config.station.ssid);
+	read_leaf(cdbsock, "/wifi/mode", new_config.mode);
 
 	cdb_end_session(cdbsock);
 
