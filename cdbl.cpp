@@ -21,8 +21,11 @@
 #include <confd_lib.h>
 #include <confd_cdb.h>
 #include "wifi.h"
+#include "WpaSupplicant.h"
 
 using namespace std;
+
+WpaSupplicant supp;
 
 #if 0
 static int signaled = 0;
@@ -55,7 +58,7 @@ struct rfhead rfheads[MAXH];
 
 static struct config
 {
-	int mode;
+	int mode = wifi_mode_off;
 
 	struct
 	{
@@ -70,9 +73,24 @@ static struct config
 	} access_point;
 } current_config, new_config;
 
-static void print_config(const struct config& config)
+bool operator==(const struct config& lhs, const struct config& rhs)
 {
-	cout << "BEGIN CONFIG" << endl;
+	return (   lhs.mode              == rhs.mode
+					&& lhs.station.ssid      == rhs.station.ssid
+					&& lhs.station.psk       == rhs.station.psk
+					&& lhs.access_point.ssid == rhs.access_point.ssid
+					&& lhs.access_point.psk  == rhs.access_point.psk
+			   );
+}
+
+bool operator!=(const struct config& lhs, const struct config& rhs)
+{
+	return !(lhs == rhs);
+}
+
+static void print_config(const char *title, const struct config& config)
+{
+	cout << "BEGIN CONFIG: " << title << endl;
 	cout << "------------" << endl;
 	cout << "mode: " << config.mode << endl;
 	cout << "station.ssid: " << config.station.ssid << endl;
@@ -126,8 +144,6 @@ void read_leaf(int cdbsock, const char *path, int& n)
 
 static void read_config(int cdbsock, struct config& config)
 {
-	int ret;
-
 	if (cdb_start_session(cdbsock, CDB_RUNNING) != CONFD_OK)
 	{
 		confd_fatal("Cannot start session: %s\n", confd_lasterr());
@@ -145,290 +161,36 @@ static void read_config(int cdbsock, struct config& config)
 	}
 #endif
 
-	read_leaf(cdbsock, "/wifi/mode", new_config.mode);
-	read_leaf(cdbsock, "/wifi/station/ssid", new_config.station.ssid);
-	read_leaf(cdbsock, "/wifi/station/psk", new_config.station.psk);
-	read_leaf(cdbsock, "/wifi/access_point/ssid", new_config.access_point.ssid);
-	read_leaf(cdbsock, "/wifi/access_point/psk", new_config.access_point.psk);
+	read_leaf(cdbsock , "/wifi/mode"              , new_config.mode              ) ;
+	read_leaf(cdbsock , "/wifi/station/ssid"      , new_config.station.ssid      ) ;
+	read_leaf(cdbsock , "/wifi/station/psk"       , new_config.station.psk       ) ;
+	read_leaf(cdbsock , "/wifi/access_point/ssid" , new_config.access_point.ssid ) ;
+	read_leaf(cdbsock , "/wifi/access_point/psk"  , new_config.access_point.psk  ) ;
 
 	cdb_end_session(cdbsock);
 
-	print_config(config);
+	print_config("read_config", config);
 }
 
-static void read_head(int cdbsock)
+static void apply_config(struct config& config)
 {
-		char buf[256];
-		int ret;
+	print_config("apply_config", config);
 
-		if (cdb_start_session(cdbsock, CDB_RUNNING) != CONFD_OK)
+	if (config.mode == wifi_mode_off)
+	{
+		supp.remove_all_networks();
+		return;
+	}
+
+	if (config.mode == wifi_mode_station)
+	{
+		if (!config.station.ssid.empty())
 		{
-			confd_fatal("Cannot start session\n");
+			supp.connect(config.station.ssid, config.station.psk);
 		}
-
-		if (cdb_cd(cdbsock, "/wifi") != CONFD_OK)
-		{
-			confd_fatal("Failed to cd /wifi %s\n", confd_lasterr());
-		}
-
-		ret = cdb_exists(cdbsock, "enable");
-		if ( (ret != 0) && (ret != 1) )
-		{
-			confd_fatal("cdb_exists failed on enable\n");
-		}
-
-		cout << "enable exists?: " << ret << endl;
-
-		if (ret == 0) return;
-#if 0
-		if (ret == 1)
-		{
-			cdb_
-		}
-
-		if (cdb_get_enum_value(cdbsock, &enable, "enable") != CONFD_OK)
-		{
-			confd_fatal("Failed to get enable %s\n", confd_lasterr());
-		}
-
-		cout << "enable: " << enable << endl;
-
-		if (cdb_cd(cdbsock, "/wifi/station") != CONFD_OK)
-		{
-			confd_fatal("Failed to cd /wifi/station");
-		}
-
-		if (cdb_get_str(cdbsock, buf, sizeof(buf), "ssid"))
-		{
-			confd_fatal("Failed to get ssid");
-		}
-
-		cout << "ssid: " << endl;
-
-		if (cdb_get_str(cdbsock, buf, sizeof(buf), "psk") != CONFD_OK)
-		{
-				confd_fatal("Failed to get psk");
-		}
-
-		cout << "psk: " << buf << endl;
-
-#endif
-		cdb_end_session(cdbsock);
+		return;
+	}
 }
-
-/* read the entire db */
-#if 0
-static void read_db(int cdbsock)
-{
-		int ret, i;
-		confd_value_t key;
-
-		if ((ret = cdb_start_session(cdbsock, CDB_RUNNING)) != CONFD_OK)
-		{
-			confd_fatal("Cannot start session\n");
-		}
-
-		if ((ret = cdb_set_namespace(cdbsock, wifi__ns)) != CONFD_OK)
-		{
-				confd_fatal("Cannot set namespace\n");
-		}
-
-		int n = cdb_num_instances(cdbsock, "/networks/network");
-
-		cout << "num_instances " << n << endl;
-
-		for(i = 0; i < n; ++i) {
-				if (cdb_get(cdbsock, &key, "/networks/network[%d]/ssid", i) != CONFD_OK)
-				{
-					confd_fatal("Can't get key");
-				}
-
-				read_head(cdbsock, &key);
-		}
-
-		cdb_end_session(cdbsock);
-}
-#endif
-
-#if 0
-static enum cdb_iter_ret iter(confd_hkeypath_t *kp,
-															enum cdb_iter_op op,
-															confd_value_t *oldv,
-															confd_value_t *newv,
-															void *state)
-{
-		char buf[BUFSIZ];
-		int cdbsock = *((int *)state);
-		confd_pp_kpath(buf, BUFSIZ, kp);
-		switch (op) {
-				case MOP_CREATED: {
-						fprintf(stderr, "Create: %s\n", buf);
-						confd_value_t *ctag = &kp->v[1][0];
-						switch (CONFD_GET_XMLTAG(ctag)) {
-								case root_RFHead:  { /* an rfhead was created */
-										/* keypath is /root/NodeB/RFHead{$key}	*/
-										/*							3			2			 1		0			*/
-
-										confd_value_t *hkey = &kp->v[0][0];
-										read_head(cdbsock, hkey);
-										return ITER_CONTINUE;
-								}
-								case root_Child: {
-										/* a child to en existing rfhead was created */
-										/* keypath is /root/NodeB/RFHead{$key}/Child{$key2}  */
-										/*							5			 4			3		 2			1		 0		 */
-										/* we can here choose to read the  new child or reread */
-										/* the entire head structure													 */
-										confd_value_t *hkey = &kp->v[2][0];
-										read_head(cdbsock, hkey);
-										return ITER_CONTINUE;
-								}
-						}
-						break;
-				}
-
-
-				case MOP_DELETED:
-						fprintf(stderr, "Delete: %s\n", buf);
-						confd_value_t *dtag;
-						dtag = &kp->v[1][0];
-						switch (CONFD_GET_XMLTAG(dtag)) {
-								case root_RFHead:  { /* an rfhead was deleted */
-										/* keypath is /root/NodeB/RFHead{$key}	*/
-										/*							3			2			 1		0			*/
-										confd_value_t *headkey = &kp->v[0][0];
-										/* Now given the key here, identifying an rfhead */
-										/* we find our rfhead and delete it */
-										int headpos = 0;
-										while (headpos < MAXH) {
-												struct rfhead *hp = &rfheads[headpos++];
-												if (CONFD_GET_INT64(headkey) == hp->dn) {
-														/* we found the head to remove */
-														/* mark it as not used; */
-														int i;
-														for (i=0; i<MAXC; i++)
-																hp->children[i].inuse = 0;
-														hp->inuse = 0;
-														return ITER_CONTINUE;
-												}
-										}
-										break;
-								}
-
-								case root_Child: {
-										/* a child of an existing head was removed */
-										/* keypath is /root/NodeB/RFHead{$key}/Child{$key2}  */
-										/*							5			 4			3		 2			1		 0		 */
-										/* we can here choose to read the  new child or reread */
-										/* the entire head structure													 */
-										confd_value_t *headkey = &kp->v[2][0];
-										confd_value_t *childkey = &kp->v[0][0];
-										/* Now given the key here, identifying an rfhead */
-										/* we find the rfhead which contains our child */
-										int headpos = 0;
-										while (headpos < MAXH) {
-												struct rfhead *hp = &rfheads[headpos++];
-												if (CONFD_GET_INT64(headkey) == hp->dn) {
-														int cpos = 0;
-														while (cpos < MAXC) {
-																struct child *cp = &hp->children[cpos++];
-																if (CONFD_GET_INT64(childkey) ==	cp->dn) {
-																		cp->inuse = 0;
-																		return ITER_CONTINUE;
-																}
-														}
-												}
-										}
-								}
-						}
-						break;
-				case MOP_MODIFIED:
-						fprintf(stderr, "Modified %s\n", buf);
-						break;
-				case MOP_VALUE_SET: {
-						char nbuf[BUFSIZ];
-						confd_pp_value(nbuf, BUFSIZ, newv);
-						fprintf(stderr, "Value Set: %s --> (%s)\n",
-										buf, nbuf);
-						confd_value_t *leaf = &kp->v[0][0];
-						switch (CONFD_GET_XMLTAG(leaf)) {
-								case root_SECTORID_ID:	 {
-										/* keypath is /root/NodeB/RFHead{$key}/SECTORID_ID	*/
-										/*							4			3			 2		 1			 0				*/
-										confd_value_t *headkey = &kp->v[1][0];
-										int headpos = 0;
-										while (headpos < MAXH) {
-												struct rfhead *hp = &rfheads[headpos++];
-												if (CONFD_GET_INT64(headkey) == hp->dn) {
-														/* copy in the new value */
-														memcpy(hp->sector_id, CONFD_GET_BUFPTR(newv),
-																	 CONFD_GET_BUFSIZE(newv));
-														hp->sector_id[CONFD_GET_BUFSIZE(newv)] = 0;
-														return ITER_RECURSE;
-														/* are our children alsomodified */
-												}
-										}
-								}
-										break;
-								case root_childAttr: {
-						 /* keypath is /root/NodeB/RFHead{$key}/Child{$key2}/childAttr	*/
-						 /*							 6			5			 4		3			 2		 1			 0			*/
-
-										confd_value_t *headkey = &kp->v[3][0];
-										confd_value_t *childkey = &kp->v[1][0];
-										/* Now given the key here, identifying an rfhead */
-										/* we find the rfhead which contains our child */
-										int headpos = 0;
-										while (headpos < MAXH) {
-												struct rfhead *hp = &rfheads[headpos++];
-												if (CONFD_GET_INT64(headkey) == hp->dn) {
-														int cpos = 0;
-														while (cpos < MAXC) {
-																struct child *cp = &hp->children[cpos++];
-																if (CONFD_GET_INT64(childkey) ==	cp->dn) {
-																		memcpy(cp->childattr,
-																					 CONFD_GET_BUFPTR(newv),
-																					 CONFD_GET_BUFSIZE(newv));
-																		cp->childattr[CONFD_GET_BUFSIZE(newv)] = 0;
-																		return ITER_CONTINUE;
-																}
-														}
-												}
-										}
-								}
-						}
-						break;
-				}
-				default:
-						/* We should never get MOP_MOVED_AFTER or MOP_ATTR_SET */
-						fprintf(stderr, "Unexpected op %d for %s\n", op, buf);
-						break;
-		}
-		return ITER_RECURSE;
-}
-#endif
-
-#if 0
-static void dump_db()
-{
-		int i, j;
-		fprintf(stderr, "\nDumping \n");
-		for (i=0; i< MAXH; i++) {
-				if (!rfheads[i].inuse) continue;
-				fprintf(stderr, "HEAD %d	<%s>\n", (int)rfheads[i].dn,
-								rfheads[i].sector_id);
-				for (j=0; j<MAXC; j++) {
-						if (!rfheads[i].children[j].inuse)
-								continue;
-						fprintf(stderr, "		Child %d	<<%s>>\n",
-										(int)rfheads[i].children[j].dn,
-										rfheads[i].children[j].childattr
-								);
-				}
-		}
-		fprintf(stderr, "---------- \n");
-}
-#endif
 
 int main(int argc, char **argv)
 {
@@ -438,6 +200,8 @@ int main(int argc, char **argv)
 		enum confd_debug_level dbgl = CONFD_SILENT;
 		const char *confd_addr = "127.0.0.1";
 		int confd_port = CONFD_PORT;
+
+		print_config("main", current_config);
 
 		while ((c = getopt(argc, argv, "dta:p:")) != EOF) {
 				switch (c) {
@@ -485,6 +249,7 @@ int main(int argc, char **argv)
 		/* initialize db */
 		cout << "Calling read_config" << endl;
 		read_config(sock, current_config);
+		apply_config(current_config);
 		//dump_db();
 
 		/* "interactive" feature, catch SIGINT and dump db to stderr */
@@ -549,6 +314,7 @@ int main(int argc, char **argv)
 						}
 
 						read_config(sock, new_config);
+						apply_config(new_config);
 
 						if ((status = cdb_sync_subscription_socket(subsock,
 																											 CDB_DONE_PRIORITY))
