@@ -32,34 +32,38 @@ $(CONFD_DIR)/src/confd/build/include.mk:
 CONFD_FLAGS ?= --addloadpath $(CONFD_DIR)/etc/confd
 START_FLAGS ?=
 
-PROG	= test
-SRC	= util.cpp test.cpp WpaSupplicant.cpp
+PROG	= wifi_mgr
+SRC	= util.cpp WpaSupplicant.cpp cdbl.cpp
 OBJS	= $(SRC:.cpp=.o)
 LIBS	+= -lcrypto
 
 
-all:	root.fxs $(PROG) $(CDB_DIR) ssh-keydir
+all:	wifi.fxs wifi.h $(PROG) $(CDB_DIR) ssh-keydir
 	@echo "Build complete"
 
 $(PROG): $(OBJS)
 	$(CXX) -o $@ $(OBJS) $(LIBS)
 
-$(PROG).o: root.h
+#%.o: wifi.h
 
 
 ######################################################################
 clean:	iclean
 	rm -rf _tmp* log/*
-	-rm -rf root.h root_proto.h $(PROG)  > /dev/null || true
+	-rm -rf wifi.h wifi_proto.h $(PROG)  > /dev/null || true
 
 ######################################################################
 
 start:  stop
 	### Start the confd daemon with our example specific confd-config
-	$(CONFD) -c confd.conf $(CONFD_FLAGS) 
+	$(CONFD) -c confd.conf $(CONFD_FLAGS)
 	### In another terminal window, start the CLI (make cli)
-	### Starting the cdb subscriber 
+	### Starting the cdb subscriber
 	./$(PROG) $(START_FLAGS)
+
+start_confd:
+	$(CONFD) -c confd.conf $(CONFD_FLAGS)
+
 
 
 ######################################################################

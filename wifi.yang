@@ -1,0 +1,32 @@
+module wifi {
+  namespace "http://tail-f.com/ns/example/wifi";
+  prefix wifi;
+
+  container wifi {
+    leaf mode {
+      type enumeration {
+        enum mode_station;
+        enum mode_access_point;
+        enum mode_off;
+      }
+    }
+
+    container station {
+      leaf ssid {
+        type string;
+      }
+      leaf psk {
+        type string;
+      }
+    }
+
+    container access_point {
+      leaf ssid {
+        type string;
+      }
+      leaf psk {
+        type string;
+      }
+    }
+  }
+}
