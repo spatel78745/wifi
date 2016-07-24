@@ -127,7 +127,6 @@ void read_leaf(int cdbsock, const char *path, int& n)
 static void read_config(int cdbsock, struct config& config)
 {
 	int ret;
-	struct config new_config = { .mode = wifi_mode_off };
 
 	if (cdb_start_session(cdbsock, CDB_RUNNING) != CONFD_OK)
 	{
@@ -146,12 +145,13 @@ static void read_config(int cdbsock, struct config& config)
 	}
 #endif
 
-	read_leaf(cdbsock, "wifi/station/ssid", new_config.station.ssid);
 	read_leaf(cdbsock, "/wifi/mode", new_config.mode);
+	read_leaf(cdbsock, "/wifi/station/ssid", new_config.station.ssid);
+	read_leaf(cdbsock, "/wifi/station/psk", new_config.station.psk);
+	read_leaf(cdbsock, "/wifi/access_point/ssid", new_config.access_point.ssid);
+	read_leaf(cdbsock, "/wifi/access_point/psk", new_config.access_point.psk);
 
 	cdb_end_session(cdbsock);
-
-	config = new_config;
 
 	print_config(config);
 }
@@ -484,7 +484,7 @@ int main(int argc, char **argv)
 
 		/* initialize db */
 		cout << "Calling read_config" << endl;
-		read_config(sock, new_config);
+		read_config(sock, current_config);
 		//dump_db();
 
 		/* "interactive" feature, catch SIGINT and dump db to stderr */
