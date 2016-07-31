@@ -17,8 +17,8 @@ static void scanner()
 	while(true)
 	{
 		debug("supp %p is scanning", &supp);
-//		supp.scan();
-		this_thread::sleep_for(seconds(120));
+		supp.scan();
+		this_thread::sleep_for(seconds(60));
 	}
 }
 
@@ -137,7 +137,7 @@ Network WpaSupplicant::get_current_network()
 	return (Network{-1});
 }
 
-void WpaSupplicant::get_scan_results()
+vector<ScanResult> WpaSupplicant::scan_results()
 {
 	string str;
 
@@ -148,14 +148,25 @@ void WpaSupplicant::get_scan_results()
 	getline(ss, str);
 	getline(ss, str);
 
-	ScanResult sr;
-	m_scan_results.clear();
-	while(ss >> sr.bssid >> sr.frequency >> sr.signal_level >> sr.flags >> sr.ssid)
+	ScanResult result;
+	vector<ScanResult> all_results;
+
+	while(getline(ss, str))
 	{
-		m_scan_results.push_back(sr);
+		vector<string> fields = split(str, '\t');
+
+		result.bssid        = fields[0];
+		result.frequency    = stoi(fields[1]);
+		result.signal_level = stoi(fields[2]);
+		result.flags        = fields[3];
+		result.ssid         = fields[4];
+
+		all_results.push_back(result);
 	}
 
-	debug("%lu results", m_scan_results.size());
+	debug("%lu results", all_results.size());
+
+	return all_results;
 }
 
 int WpaSupplicant::add_network()
@@ -189,9 +200,3 @@ void WpaSupplicant::remove_all_networks()
 
 	for(auto& nw: nw_list) remove_network(nw.network_id);
 }
-
-const vector<ScanResult>& WpaSupplicant::scan_results()
-{
-	return m_scan_results;
-}
-

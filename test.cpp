@@ -27,16 +27,21 @@ void test_stoi()
 	}
 }
 
-void test_scan()
+void test_scan_results()
 {
-	supp.get_scan_results();
+	int iteration = 0;
 
-	auto& scan_results = supp.scan_results();
-
-	for(auto& sr: scan_results)
+	while(true)
 	{
-		debug("scan_result: %s %d %d %s %s", sr.bssid.c_str(), sr.frequency, sr.signal_level,
-				sr.flags.c_str(), sr.ssid.c_str());
+		const vector<ScanResult>& scan_results = supp.scan_results();
+
+		for(auto& sr: scan_results)
+		{
+			debug("scan_result: (%d) %s %d %d %s %s", iteration, sr.bssid.c_str(), sr.frequency, sr.signal_level,
+					sr.flags.c_str(), sr.ssid.c_str());
+		}
+		++iteration;
+		this_thread::sleep_for(seconds(5));
 	}
 }
 
@@ -250,5 +255,5 @@ void test_split()
 int main(int argc, char *argv[])
 {
 	debug("supp=%p", &supp);
-	this_thread::sleep_for(seconds(3600));
+	test_scan_results();
 }

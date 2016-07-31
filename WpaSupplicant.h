@@ -33,9 +33,7 @@ class WpaSupplicant
 
 		void scan(void);
 
-		void get_scan_results();
-
-		const vector<ScanResult>& scan_results();
+		vector<ScanResult> scan_results();
 
 		int add_network();
 
@@ -64,8 +62,6 @@ class WpaSupplicant
 		void wpa_cli(string cmd);
 
 	private:
-		vector<ScanResult> m_scan_results;
-
 		bool failed(string &output);
 
 		WpaSupplicant();
