@@ -6,8 +6,9 @@
 #include "WpaSupplicant.h"
 
 using namespace std;
+using namespace std::chrono;
 
-static WpaSupplicant supp;
+static WpaSupplicant& supp = WpaSupplicant::getInstance();
 
 const char *test_ssid = "Mine not yours";
 const char *test_psk = "bapa1602";
@@ -248,6 +249,6 @@ void test_split()
 
 int main(int argc, char *argv[])
 {
-	Network nw = supp.get_current_network();
-	print_network(nw);
+	debug("supp=%p", &supp);
+	this_thread::sleep_for(seconds(3600));
 }

@@ -2,6 +2,8 @@
 #define WPA_SUPPLICANT_H
 
 #include <vector>
+#include <thread>
+
 #include "WifiManagerException.h"
 
 using namespace std;
@@ -26,7 +28,8 @@ struct Network
 class WpaSupplicant
 {
 	public:
-		WpaSupplicant();
+
+		static WpaSupplicant& getInstance();
 
 		void scan(void);
 
@@ -64,6 +67,16 @@ class WpaSupplicant
 		vector<ScanResult> m_scan_results;
 
 		bool failed(string &output);
+
+		WpaSupplicant();
+
+		WpaSupplicant(const WpaSupplicant& rs);
+
+		WpaSupplicant& operator=(const WpaSupplicant& rs);
+
+		~WpaSupplicant() { };
+
+		static WpaSupplicant *m_instance;
 };
 
 #endif

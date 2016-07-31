@@ -2,11 +2,50 @@
 #include <sstream>
 #include <iostream>
 #include <cassert>
+#include <thread>
 #include "util.h"
 #include "WpaSupplicant.h"
 
+WpaSupplicant * WpaSupplicant::m_instance = nullptr;
+
+using namespace std::chrono;
+
+static void scanner()
+{
+	static WpaSupplicant& supp = WpaSupplicant::getInstance();
+
+	while(true)
+	{
+		debug("supp %p is scanning", &supp);
+//		supp.scan();
+		this_thread::sleep_for(seconds(120));
+	}
+}
+
 WpaSupplicant::WpaSupplicant()
 {
+	thread(scanner).detach();
+}
+
+WpaSupplicant::WpaSupplicant(const WpaSupplicant& rs)
+{
+	m_instance = rs.m_instance;
+}
+
+WpaSupplicant& WpaSupplicant::operator=(const WpaSupplicant& rs)
+{
+	if (this != &rs) m_instance = rs.m_instance;
+
+	return *this;
+}
+
+WpaSupplicant& WpaSupplicant::getInstance()
+{
+	static WpaSupplicant theInstance;
+
+	m_instance = &theInstance;
+
+	return *m_instance;
 }
 
 bool WpaSupplicant::failed(string& output)
@@ -155,3 +194,4 @@ const vector<ScanResult>& WpaSupplicant::scan_results()
 {
 	return m_scan_results;
 }
+

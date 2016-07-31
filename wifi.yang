@@ -2,7 +2,51 @@ module wifi {
   namespace "http://tail-f.com/ns/example/wifi";
   prefix wifi;
 
-  container wifi {
+  import ietf-inet-types {
+    prefix inet;
+  }
+  import tailf-common {
+    prefix tailf;
+  }
+
+	typedef IfType {
+		type enumeration {
+			enum dynamic;
+			enum static;
+		}
+	}
+
+	container scan_results {
+		config false;
+		tailf:callpoint wifi_scan_results;
+		list result {
+			key "bssid";
+
+			leaf bssid {
+				type string;
+			}
+			leaf frequency {
+				type int32;
+			}
+			leaf signal_level {
+				type int32;
+			}
+			leaf flags {
+				type string;
+			}
+			leaf ssid {
+				type string;
+			}
+		}
+	}
+
+  list wifi {
+		key port;
+
+		leaf port {
+			type int32;
+		}
+
     leaf mode {
       type enumeration {
         enum mode_station;
@@ -18,6 +62,10 @@ module wifi {
       leaf psk {
         type string;
       }
+			leaf ip-address-src {
+				type IfType;
+				default dynamic;
+			}
     }
 
     container access_point {
