@@ -361,7 +361,7 @@ static int get_elem(struct confd_trans_ctx *tctx, confd_hkeypath_t * keypath)
 	debug("Enter");
 	const char *bssid_key = (char *)CONFD_GET_BUFPTR(&keypath->v[1][0]);
 	unsigned i;
-	auto& scan_results = supp.scan_results();
+	const vector<ScanResult>& scan_results = *(vector<ScanResult> *)tctx->t_opaque;
 
 	for(i = 0; i != scan_results.size(); ++i) { if (scan_results[i].bssid == bssid_key) break; }
 
@@ -371,7 +371,6 @@ static int get_elem(struct confd_trans_ctx *tctx, confd_hkeypath_t * keypath)
 		confd_data_reply_not_found(tctx);
 		return CONFD_OK;
 	}
-
 
 	confd_value_t v;
 	auto& scan_result = scan_results[i];
@@ -410,15 +409,16 @@ static int get_next(struct confd_trans_ctx *tctx, confd_hkeypath_t * keypath __a
 		long next)
 {
 	debug("Enter");
+	static vector<ScanResult> scan_results;
+
 	try
 	{
 		if (next == -1)
 		{
-			supp.get_scan_results();
+			scan_results = supp.scan_results();
+			tctx->t_opaque = &scan_results;
 			next = 0;
 		}
-
-		auto& scan_results = supp.scan_results();
 
 		if ((unsigned long)next == scan_results.size())
 		{
