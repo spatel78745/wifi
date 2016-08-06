@@ -1,6 +1,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "util.h"
 #include "WpaSupplicant.h"
@@ -12,6 +13,20 @@ static WpaSupplicant& supp = WpaSupplicant::getInstance();
 
 const char *test_ssid = "Mine not yours";
 const char *test_psk = "bapa1602";
+
+const char *confd_lasterr()
+{
+	static const char *str = "Fake error";
+
+	return str;
+}
+
+void test_macro()
+{
+	int a = 10;
+
+	check(a != 10, "maapi_create failed %d", 999);
+}
 
 void test_stoi()
 {
@@ -60,32 +75,6 @@ void test_remove_network()
 	supp.remove_network(n3);
 }
 
-void test_wpa_cli()
-{
-	string cmd;
-	string out;
-
-	while(cin && (cmd != "quit"))
-	{
-		try
-		{
-			cout << "Enter a wpa_supplicant command" << endl;
-			getline(cin, cmd);
-			if (cin && cmd != "quit")
-			{
-				supp.wpa_cli(cmd, out);
-				cout << "======================" << endl;
-				cout << out << endl;
-				cout << "++++++++++++++++++++++" << endl;
-			}
-		}
-		catch(exception& e)
-		{
-			cout << "Exception: " << e.what() << endl;
-		}
-	}
-}
-
 void test_manual_connect()
 {
 	try
@@ -101,73 +90,11 @@ void test_manual_connect()
 	}
 }
 
-void connect_to_test_network()
-{
-  cout << "Connecting to test network" << endl;
-
-	try
-	{
-		supp.connect(test_ssid, test_psk);
-	}
-	catch(exception& e)
-	{
-		cerr << "Failed to connect: " << e.what() << endl;
-	}
-}
-
-void test_connect()
-{
-
-	cout << "test_connect" << endl;
-	try
-	{
-		supp.connect("TEST_CONNECT");
-	}
-	catch(exception& e)
-	{
-		cerr << "Failed to connect: " << e.what() << endl;
-	}
-}
-#if 0
-void test_connect_disconnect()
-{
-	cout << "test_connect_disconnect()" << endl;
-
-	using namespace chrono;
-
-	try
-	{
-		cout << "connecting..." << endl;
-		supp.connect("TEST_CONNECT_DISCONNECT");
-		cout << "waiting for 60s" << endl;
-		this_thread::sleep_for(seconds(60));
-		cout << "disconnecting..." << endl;
-		supp.disconnect();
-	}
-	catch(exception& e)
-	{
-		cerr << "Failed" << endl;
-	}
-}
-#endif
 void test_add_network()
 {
 	cout << "Network id: " << supp.add_network() << endl;
 	cout << "Network id: " << supp.add_network() << endl;
 	cout << "Network id: " << supp.add_network() << endl;
-}
-
-void test_set_network()
-{
-	int network_id = supp.add_network();
-	cout << "set_network " << network_id << " ssid TEST_NET" << endl;
-	supp.set_network(network_id, "ssid", "TEST_NET");
-	cout << "======================" << endl;
-	cout << "Results:" << endl;
-
-	string out;
-	supp.wpa_cli("list_networks", out);
-	cout << out << endl;
 }
 
 void add_some_networks()
@@ -252,8 +179,166 @@ void test_split()
   split_report(s1, fields);
 }
 
+void test_status()
+{
+	int iteration = 0;
+
+	while(true)
+	{
+		map<string, string> status = supp.status();
+		for(auto& s: status)
+		{
+			cout << iteration << ": " << s.first << "=" << s.second << endl;
+		}
+		this_thread::sleep_for(seconds(5));
+	}
+}
+
+void test_start_ap()
+{
+	map<string, string> config = {
+		{ "ctrl_interface", "/run/hostapd" },
+		{ "interface", "wlan0" },
+		{ "driver", "nl80211" },
+		{ "ssid", "SAMEER" },
+		{ "logger_syslog", "-1"},
+		{ "logger_syslog_level", "1" }
+	};
+
+	supp.ap(config);
+}
+
+void test_cli()
+{
+	map<string, string> ap_config = {
+		{ "ctrl_interface" , "/run/hostapd" } ,
+		{ "interface"      , "wlan0"        } ,
+		{ "driver"         , "nl80211"      } ,
+		{ "ssid"           , "SAMEER"       } ,
+		{ "channel"        , "1"            }
+	};
+
+	map<string, string> sta_config = {
+		{ "ctrl_interface" , "/run/wpa_supplicant" } ,
+		{ "update_config"  , "1"                   } ,
+	};
+
+	string cmd;
+
+	cout << "Stopping ap and sta" << endl;
+	supp.stop_ap();
+	supp.stop_sta();
+
+	cout << ">> " << flush;
+	while(cin)
+	{
+		cin >> cmd;
+		if (cmd == "sc")
+		{
+			string type, key, val;
+
+			cin >> type >> key >> val;
+			cout << "Set config " << type << " " << key << "=" << val << endl;
+			if   	  (type == "ap") 	ap_config[key] = val;
+			else if (type == "sta") sta_config[key] = val;
+			else 										cout << "Error: unknown config" << endl;
+		}
+		else if (cmd == "pc")
+		{
+			string type;
+			map<string, string> config;
+
+			cin >> type;
+			if      (type == "ap") 	config = ap_config;
+			else if (type == "sta") config = sta_config;
+			else 										cout << "Error: unknown config" << endl;
+
+			cout << "Config" << endl;
+			for(auto& p: config)
+			{
+				cout << p.first << "=" << p.second << endl;
+			}
+		}
+		else if (cmd == "ap")
+		{
+			supp.ap(ap_config);
+			cout << "AP started" << endl;
+		}
+		else if (cmd == "stop-ap")
+		{
+			supp.stop_ap();
+			cout << "AP stopped" << endl;
+			system("systemctl is-active hostapd-rmf.service");
+		}
+		else if (cmd == "sta")
+		{
+			supp.sta(sta_config);
+		}
+		else if (cmd == "stop-sta")
+		{
+			supp.stop_sta();
+			cout << "STA stopped" << endl;
+			system("systemctl is-active wpa_supplicant-rmf.service");
+		}
+		else if (cmd == "rfkill")
+		{
+			supp.stop_sta();
+			cout << "STA stopped" << endl;
+			supp.stop_ap();
+			cout << "AP stopped" << endl;
+			cout << "STA status" << endl;
+			system("systemctl is-active wpa_supplicant-rmf.service");
+			cout << "AP status" << endl;
+			system("systemctl is-active hostapd-rmf.service");
+		}
+		else if (cmd == "stat")
+		{
+			cout << "wpa_supplicant" << endl;
+			system("systemctl is-active wpa_supplicant-rmf.service");
+			cout << "hostapd" << endl;
+			system("systemctl is-active hostapd-rmf.service");
+		}
+		else if (cmd == "scr")
+		{
+			vector<ScanResult> sr = supp.scan_results();
+
+			struct comp {
+				bool operator() (ScanResult a, ScanResult b)
+				{
+					return a.signal_level < b.signal_level;
+				}
+			} comp;
+
+			sort(sr.begin(), sr.end(), comp);
+			map<string, int> ssids;
+
+			for(auto& r: sr)
+			{
+				ssids[r.ssid] = r.signal_level;
+			}
+
+			for(auto& ap: ssids)
+			{
+				cout << ap.first << " " << ap.second << endl;
+			}
+
+			cout << "DONE" << endl;
+		}
+		else if (cmd == "q")
+		{
+			exit(0);
+		}
+		else
+		{
+			cout << "Unknown command: " << cmd << endl;
+		}
+
+		cout << ">> " << flush;
+	}
+}
+
 int main(int argc, char *argv[])
 {
-	debug("supp=%p", &supp);
-	test_scan_results();
+	test_macro();
+//	test_cli();
 }

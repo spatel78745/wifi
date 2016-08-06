@@ -1,7 +1,3 @@
-/*
- * Copyright 2007 Tail-F Systems AB
- */
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -15,19 +11,21 @@
 #include <signal.h>
 #include <errno.h>
 #include <iostream>
-
-
 #include <confd_lib.h>
 #include <confd_cdb.h>
 #include <confd_dp.h>
-#include "confd_maapi.h"
 
+#include "confd_maapi.h"
 #include "util.h"
 #include "wifi.h"
+
 #include "WpaSupplicant.h"
 
 using namespace std;
 
+///////////////////////////////////////////////////////////////////////////////
+// Defines
+///////////////////////////////////////////////////////////////////////////////
 #define rmf__wifiMode_off						wifi_mode_off
 #define rmf__wifiMode_station				wifi_mode_station
 #define rmf__wifiMode_access_point	wifi_mode_access_point
@@ -42,12 +40,9 @@ using namespace std;
 
 #define WIFI_DIR							"/wifi"
 
-WpaSupplicant& supp = WpaSupplicant::getInstance();
-
-static int ctlsock;
-static int workersock;
-static struct confd_daemon_ctx *dctx;
-
+///////////////////////////////////////////////////////////////////////////////
+// Data
+///////////////////////////////////////////////////////////////////////////////
 static struct config
 {
 	int mode = rmf__wifiMode_off;
@@ -65,6 +60,12 @@ static struct config
 		string psk;
 	} access_point;
 } current_config, new_config;
+
+static WpaSupplicant& supp = WpaSupplicant::getInstance();
+
+static int ctlsock;
+static int workersock;
+static struct confd_daemon_ctx *dctx;
 
 bool operator==(const struct config& lhs, const struct config& rhs)
 {
@@ -87,7 +88,6 @@ static void print_config(const char *title, const struct config& config)
 	string mode_str;
 	int mode = config.mode;
 
-
 	if      (mode == rmf__wifiMode_off)					 mode_str = "off";
 	else if (mode == rmf__wifiMode_station)			 mode_str = "station";
 	else if (mode == rmf__wifiMode_access_point) mode_str = "ap";
@@ -102,6 +102,20 @@ static void print_config(const char *title, const struct config& config)
 	cout << "access_point.psk: " << config.access_point.psk << endl;
 	cout << "END CONFIG" << endl;
 	cout << "----------" << endl;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// confd API helpers
+///////////////////////////////////////////////////////////////////////////////
+static bool path_exists(int msock, int th, const char *path)
+{
+	int ret = maapi_exists(msock, th, path);
+	if (confd_errno != CONFD_OK)
+	{
+		throw WifiManagerException(__FILE__, __LINE__, confd_lasterr() + string(": maapi_exists ") + path);
+	}
+
+	return ret;
 }
 
 void read_leaf(int cdbsock, const char *path, string& str)
@@ -137,63 +151,12 @@ void read_leaf(int cdbsock, const char *path, int& n)
 	}
 }
 
-static void read_config(int cdbsock, struct config& config)
-{
-	if (cdb_set_namespace(cdbsock, rmf__ns) != CONFD_OK)
-	{
-		confd_fatal("Cannot set namespace to wifi__ns: %s", confd_lasterr());
-	}
-
-	int ret;
-
-	ret = cdb_cd(cdbsock, "%s[0]", WIFI_DIR);
-	if (ret != CONFD_OK)
-	{
-		confd_fatal("cdb_cd failed (%s)", confd_lasterr());
-	}
-
-	read_leaf(cdbsock , "mode"                   , config.mode                   ) ;
-	read_leaf(cdbsock , "station/ssid"           , config.station.ssid           ) ;
-	read_leaf(cdbsock , "station/psk"            , config.station.psk            ) ;
-	read_leaf(cdbsock , "station/ip-address-src" , config.station.ip_address_src ) ;
-	read_leaf(cdbsock , "access_point/ssid"      , config.access_point.ssid      ) ;
-	read_leaf(cdbsock , "access_point/psk"       , config.access_point.psk       ) ;
-
-	print_config("read_config", config);
-}
-
-static void apply_config(struct config& config)
-{
-	print_config("apply_config", config);
-
-	if (config.mode == rmf__wifiMode_off)
-	{
-		supp.remove_all_networks();
-		return;
-	}
-
-	if (config.mode == rmf__wifiMode_station)
-	{
-		if (!config.station.ssid.empty())
-		{
-			supp.connect(config.station.ssid, config.station.psk);
-		}
-		return;
-	}
-}
 
 void write_leaf(int msock, int th, const char *path, string& val)
 {
 	int ret;
 
-	ret = maapi_exists(msock, th, path);
-	if (confd_errno != CONFD_OK)
-	{
-		confd_fatal("%s:%d Failed to write %s to %s err=%s", __func__, __LINE__,
-				val.c_str(), path, confd_lasterr());
-	}
-
-	if (!ret)
+	if (!path_exists(msock, th, path))
 	{
 		ret = maapi_create(msock, th, path);
 		if (ret != CONFD_OK)
@@ -242,6 +205,101 @@ void write_leaf_enum(int msock, int th, const char *path, int val)
 	}
 }
 
+void start_transaction(int& sock, int& th)
+{
+	debug("Start transaction");
+	check(((sock = socket(PF_INET, SOCK_STREAM, 0)) < 0), "socket failed");
+
+	struct sockaddr_in addr;
+
+	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(CONFD_PORT);
+
+	debug("maapi_connect");
+	if (maapi_connect(sock, (struct sockaddr*)&addr,
+				sizeof (struct sockaddr_in)) < 0)
+	{
+		throw WifiManagerException(__FILE__, __LINE__, confd_lasterr() + string(": maapi_connect"));
+	}
+
+	struct confd_ip ip;
+	const char *groups[] = { "admin" };
+
+	ip.af = AF_INET;
+	inet_pton(AF_INET, "127.0.0.1", &ip.ip.v4);
+
+	debug("maapi_start_user_session as admin");
+	if (maapi_start_user_session(sock, "admin", "system", groups, 1, &ip,
+				CONFD_PROTO_TCP) != CONFD_OK)
+	{
+		throw WifiManagerException(__FILE__, __LINE__, confd_lasterr() + string(": maapi_start_user_session"));
+	}
+
+	debug("maapi_start_trans");
+	if ((th = maapi_start_trans(sock, CONFD_RUNNING, CONFD_READ_WRITE)) < 0)
+	{
+		throw WifiManagerException(__FILE__, __LINE__, confd_lasterr() + string(": maapi_connect"));
+	}
+}
+
+void finish_transaction(int msock, int th)
+{
+	check((maapi_apply_trans(msock, th, 0) != CONFD_OK), "maapi_apply_trans failed: %s"     , confd_lasterr());
+	check((maapi_finish_trans(msock, th)   != CONFD_OK), "maapi_finish_trans failed: %s"    , confd_lasterr());
+	check((maapi_end_user_session(msock)   != CONFD_OK), "maapi_end_user_session failed: %s", confd_lasterr());
+
+	(void)maapi_close(msock);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Subscription handlers
+///////////////////////////////////////////////////////////////////////////////
+static void read_config(int cdbsock, struct config& config)
+{
+	if (cdb_set_namespace(cdbsock, rmf__ns) != CONFD_OK)
+	{
+		confd_fatal("Cannot set namespace to wifi__ns: %s", confd_lasterr());
+	}
+
+	int ret;
+
+	ret = cdb_cd(cdbsock, "%s[0]", WIFI_DIR);
+	if (ret != CONFD_OK)
+	{
+		confd_fatal("cdb_cd failed (%s)", confd_lasterr());
+	}
+
+	read_leaf(cdbsock , "mode"                   , config.mode                   ) ;
+	read_leaf(cdbsock , "station/ssid"           , config.station.ssid           ) ;
+	read_leaf(cdbsock , "station/psk"            , config.station.psk            ) ;
+	read_leaf(cdbsock , "station/ip-address-src" , config.station.ip_address_src ) ;
+	read_leaf(cdbsock , "access_point/ssid"      , config.access_point.ssid      ) ;
+	read_leaf(cdbsock , "access_point/psk"       , config.access_point.psk       ) ;
+
+	print_config("read_config", config);
+}
+
+static void apply_config(struct config& config)
+{
+	print_config("apply_config", config);
+
+	if (config.mode == rmf__wifiMode_off)
+	{
+		supp.remove_all_networks();
+		return;
+	}
+
+	if (config.mode == rmf__wifiMode_station)
+	{
+		if (!config.station.ssid.empty())
+		{
+			//supp.connect(config.station.ssid, config.station.psk);
+		}
+		return;
+	}
+}
+
 void init_daemon()
 {
 	struct confd_action_cbs acb;
@@ -284,63 +342,26 @@ void init_daemon()
 
 void make_wifi_node()
 {
-	// Create a socket
-	int sock;
+	int sock, th;
 
-	if ((sock = socket(PF_INET, SOCK_STREAM, 0)) < 0 )
-			confd_fatal("Failed to open socket\n");
-
-	// Create a maapi connection to confd
-	struct sockaddr_in addr;
-
-	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(CONFD_PORT);
-
-	if (maapi_connect(sock, (struct sockaddr*)&addr,
-										sizeof (struct sockaddr_in)) < 0)
-			confd_fatal("Failed to confd_connect() to confd \n");
-
-	// Start an admin-user session
-		struct confd_ip ip;
-		const char *groups[] = {"admin"};
-
-    ip.af = AF_INET;
-    inet_pton(AF_INET, "127.0.0.1", &ip.ip.v4);
-
-    if (maapi_start_user_session(sock, "admin", "system", groups, 1, &ip, CONFD_PROTO_TCP) != CONFD_OK)
-		{
-			confd_fatal("Failed to start user session");
-		}
-
-	// Start a transaction
-	int tid;
-
-	if ((tid = maapi_start_trans(sock, CONFD_RUNNING, CONFD_READ_WRITE)) < 0)
-			confd_fatal("failed to start trans \n");
+	start_transaction(sock, th);
 
 	// Create wifi{0}
-	int ret = maapi_create(sock, tid, "/wifi{1}");
+	int ret = maapi_create(sock, th, "/wifi{1}");
 	if (ret != CONFD_OK && confd_errno != CONFD_ERR_ALREADY_EXISTS)
 	{
-		confd_fatal("Failed to maapi_create /wifi{1}: %s", confd_lasterr());
+		throw WifiManagerException(__FILE__, __LINE__, confd_lasterr() + string(": maapi_create"));
 	}
 
-	// Apply the transaction
-	if (maapi_apply_trans(sock, tid, 0) != CONFD_OK)
+	if (maapi_apply_trans(sock, th, 0) != CONFD_OK)
 	{
-		confd_fatal("Failed to maapi_apply_trans: %s", confd_lasterr());
+		throw WifiManagerException(__FILE__, __LINE__, confd_lasterr() + string(": maapi_apply_transaction"));
 	}
 
-	// Close the socket
 	if (maapi_close(sock) != CONFD_OK)
 	{
-		confd_fatal("Failed to maapi_close: %s", confd_lasterr());
+		throw WifiManagerException(__FILE__, __LINE__, confd_lasterr() + string(": maapi_close"));
 	}
-}
-
-void register_actions()
-{
 }
 
 void update_config(int cdbsock)
@@ -458,6 +479,48 @@ static int init_connect_point(struct confd_user_info *uinfo)
 	return CONFD_OK;
 }
 
+#if 0
+static void action_connect_thread()
+{
+	int msock, th;
+
+	start_transaction(msock, th);
+
+	debug("maapi_cd to /wifi{1}");
+	if (maapi_cd(msock, th, "/wifi{1}") != CONFD_OK)
+	{
+		throw WifiManagerException(__FILE__, __LINE__, "maapi_cd failed");
+	}
+
+	debug("Writing ssid, mode");
+	write_leaf(msock, th, "station/ssid", new_config.station.ssid);
+	write_leaf_enum(msock, th, "mode", rmf__wifiMode_station);
+
+	debug("Applying transaction");
+	rval =  maapi_apply_trans(msock, th, 0);
+	if (rval != CONFD_OK)
+	{
+		confd_fatal("%s: Failed to apply transaction: %s(%d)", __FUNCTION__, confd_lasterr(), confd_errno);
+	}
+
+	debug("Finishing transaction");
+	rval = maapi_finish_trans(msock, th);
+	if (rval != CONFD_OK)
+	{
+		confd_fatal("%s.:Failed to finish transaction:%s(%d)", __FUNCTION__, confd_lasterr(), confd_errno);
+	}
+	rval =  maapi_end_user_session(msock);
+	if (rval != CONFD_OK)
+	{
+		confd_fatal("%s.:Failed to detach maapi:%s(%d)", __FUNCTION__, confd_lasterr(), confd_errno);
+	}
+	debug("%s: created %s, finished transaction", __FUNCTION__, new_config.station.ssid.c_str());
+
+	maapi_close(msock);
+}
+#endif
+
+
 static int action_connect(struct confd_user_info *uinfo __attribute__ ((unused)),
 		struct xml_tag *name __attribute__ ((unused)), confd_hkeypath_t * kp __attribute__ ((unused)),
 		confd_tag_value_t * params __attribute__ ((unused)), int n __attribute__ ((unused)))
@@ -478,17 +541,19 @@ static int action_connect(struct confd_user_info *uinfo __attribute__ ((unused))
 		case wifi_connect:
 			try
 			{
+#if 0
 				thread(action_thread).detach();
 				string msg("Connecting to ");
 				msg += ssid;
 				CONFD_SET_TAG_STR(reply, wifi_status, msg.c_str());
+#endif
 			}
 			catch(exception& e)
 			{
 				debug("caught exception %s", e.what());
-				CONFD_SET_TAG_STR(reply, wifi_status, e.what());
+				CONFD_SET_TAG_STR(&reply, wifi_status, e.what());
 			}
-			confd_action_reply_values(uinfo, reply, 1);
+			confd_action_reply_values(uinfo, &reply, 1);
 			break;
 		default:
 			confd_fatal("Got bad operation: %d", name->tag);
@@ -540,6 +605,7 @@ int main(int argc, char **argv)
 
 		print_config("main", current_config);
 
+		// Process command-line options
 		while ((c = getopt(argc, argv, "dta:p:")) != EOF) {
 				switch (c) {
 				case 'd': dbgl = CONFD_DEBUG; break;
@@ -549,18 +615,20 @@ int main(int argc, char **argv)
 				}
 		}
 
+		// Initialize IP address to confd
 		addr.sin_addr.s_addr = inet_addr(confd_addr);
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(confd_port);
 
 		confd_init(argv[0], stderr, dbgl);
 
+		// Create wifi{1}
 		make_wifi_node();
 
 		init_daemon();
 
+		// Register data callbacks
 		register_cbs();
-
     if (confd_register_done(dctx) != CONFD_OK)
         confd_fatal("Failed to complete registration \n");
 

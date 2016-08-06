@@ -3,6 +3,8 @@
 
 #include <vector>
 #include <thread>
+#include <map>
+#include <mutex>
 
 #include "WifiManagerException.h"
 
@@ -15,6 +17,7 @@ struct ScanResult
 	int signal_level;
 	string flags;
 	string ssid;
+	~ScanResult() {} // Required because of -Werror=inline
 };
 
 struct Network
@@ -23,6 +26,7 @@ struct Network
 	string ssid;
 	string bssid;
 	string flags;
+	~Network() {} // Required because of -Werror=inline
 };
 
 class WpaSupplicant
@@ -47,7 +51,7 @@ class WpaSupplicant
 
 		void enable_network(int network_id);
 
-		void connect(const string ssid, const string psk="");
+		void sta(map<string, string>& config);
 
 		void disconnect();
 
@@ -57,9 +61,23 @@ class WpaSupplicant
 
 		Network get_current_network();
 
-		void wpa_cli(string cmd, string& output);
+		void update_status();
 
-		void wpa_cli(string cmd);
+		map<string, string> status();
+
+		void ap(map<string, string>& config);
+
+		void stop_ap();
+
+		void stop_sta();
+
+		map<string, string> ap_config();
+
+		void stop_scan_task();
+
+		void stop_update_status_task();
+
+		void rfkill();
 
 	private:
 		bool failed(string &output);
@@ -73,6 +91,10 @@ class WpaSupplicant
 		~WpaSupplicant() { };
 
 		static WpaSupplicant *m_instance;
+
+		mutex m_status_mutex;
+
+		map<string, string> m_status;
 };
 
 #endif
