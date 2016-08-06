@@ -197,8 +197,6 @@ static void switch_service(string old_service, string new_service)
 
 WpaSupplicant::WpaSupplicant()
 {
-	task_manager.add_task(scan_task, SCAN_DELAY, "scan_task");
-	task_manager.add_task(update_status_task, UPDATE_STATUS_DELAY, "update_status_task");
 }
 
 WpaSupplicant::WpaSupplicant(const WpaSupplicant& rs)

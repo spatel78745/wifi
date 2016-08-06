@@ -39,11 +39,12 @@ using namespace std;
 #define rmf_ifs_ssid								wifi_ssid
 
 #define WIFI_DIR							"/wifi"
+#define BUF_SIZE							256
 
 ///////////////////////////////////////////////////////////////////////////////
 // Data
 ///////////////////////////////////////////////////////////////////////////////
-static struct config
+struct wifi_config
 {
 	int mode = rmf__wifiMode_off;
 
@@ -59,7 +60,7 @@ static struct config
 		string ssid;
 		string psk;
 	} access_point;
-} current_config, new_config;
+};
 
 static WpaSupplicant& supp = WpaSupplicant::getInstance();
 
@@ -67,7 +68,7 @@ static int ctlsock;
 static int workersock;
 static struct confd_daemon_ctx *dctx;
 
-bool operator==(const struct config& lhs, const struct config& rhs)
+bool operator==(const struct wifi_config& lhs, const struct wifi_config& rhs)
 {
 	return (   lhs.mode              == rhs.mode
 					&& lhs.station.ssid      == rhs.station.ssid
@@ -77,12 +78,9 @@ bool operator==(const struct config& lhs, const struct config& rhs)
 				 );
 }
 
-bool operator!=(const struct config& lhs, const struct config& rhs)
-{
-	return !(lhs == rhs);
-}
+bool operator!=(const struct wifi_config& lhs, const struct wifi_config& rhs) { return !(lhs == rhs); }
 
-static void print_config(const char *title, const struct config& config)
+static void print_config(const char *title, const struct wifi_config& config)
 {
 	// Convert mode to a string
 	string mode_str;
@@ -207,7 +205,6 @@ void write_leaf_enum(int msock, int th, const char *path, int val)
 
 void start_transaction(int& sock, int& th)
 {
-	debug("Start transaction");
 	check(((sock = socket(PF_INET, SOCK_STREAM, 0)) < 0), "socket failed");
 
 	struct sockaddr_in addr;
@@ -245,59 +242,45 @@ void start_transaction(int& sock, int& th)
 
 void finish_transaction(int msock, int th)
 {
-	check((maapi_apply_trans(msock, th, 0) != CONFD_OK), "maapi_apply_trans failed: %s"     , confd_lasterr());
-	check((maapi_finish_trans(msock, th)   != CONFD_OK), "maapi_finish_trans failed: %s"    , confd_lasterr());
-	check((maapi_end_user_session(msock)   != CONFD_OK), "maapi_end_user_session failed: %s", confd_lasterr());
+	ok(maapi_apply_trans(msock, th, 0), "maapi_apply_trans");
+	ok(maapi_finish_trans(msock, th), "maapi_finish_trans");
+	ok(maapi_end_user_session(msock), "maapi_end_user_session");
 
 	(void)maapi_close(msock);
+}
+
+string get_string_leaf(int cdbsock, const char *path)
+{
+	char buf[BUF_SIZE];
+
+	get_leaf(cdb_get_str(cdbsock, buf, BUF_SIZE, path), "cdb_get_str");
+	return string(buf);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Subscription handlers
 ///////////////////////////////////////////////////////////////////////////////
-static void read_config(int cdbsock, struct config& config)
+static void read_config(int cdbsock, struct wifi_config& config)
 {
-	if (cdb_set_namespace(cdbsock, rmf__ns) != CONFD_OK)
-	{
-		confd_fatal("Cannot set namespace to wifi__ns: %s", confd_lasterr());
-	}
+	char buf[BUF_SIZE];
 
-	int ret;
+	ok(cdb_set_namespace(cdbsock, rmf__ns), "cdb_set_namespace");
+	ok(cdb_cd(cdbsock, "%s[0]", WIFI_DIR), "cdb_cd");
 
-	ret = cdb_cd(cdbsock, "%s[0]", WIFI_DIR);
-	if (ret != CONFD_OK)
-	{
-		confd_fatal("cdb_cd failed (%s)", confd_lasterr());
-	}
+	get_leaf(cdb_get_enum_value(cdbsock, &config.mode, "mode"), "cdb_get_enum_value");
+	get_leaf(cdb_get_enum_value(cdbsock, &config.station.ip_address_src, "station/ip-address-src"), "cdb_get_enum_value");
+	config.station.ssid = get_string_leaf(cdbsock, "station/ssid");
+	config.station.psk = get_string_leaf(cdbsock, "station/psk");
 
-	read_leaf(cdbsock , "mode"                   , config.mode                   ) ;
-	read_leaf(cdbsock , "station/ssid"           , config.station.ssid           ) ;
-	read_leaf(cdbsock , "station/psk"            , config.station.psk            ) ;
-	read_leaf(cdbsock , "station/ip-address-src" , config.station.ip_address_src ) ;
-	read_leaf(cdbsock , "access_point/ssid"      , config.access_point.ssid      ) ;
-	read_leaf(cdbsock , "access_point/psk"       , config.access_point.psk       ) ;
+	config.access_point.ssid = get_string_leaf(cdbsock, "access_point/ssid");
+	config.access_point.psk = get_string_leaf(cdbsock, "access_point/psk");
 
 	print_config("read_config", config);
 }
 
-static void apply_config(struct config& config)
+static void apply_config(struct wifi_config& config)
 {
 	print_config("apply_config", config);
-
-	if (config.mode == rmf__wifiMode_off)
-	{
-		supp.remove_all_networks();
-		return;
-	}
-
-	if (config.mode == rmf__wifiMode_station)
-	{
-		if (!config.station.ssid.empty())
-		{
-			//supp.connect(config.station.ssid, config.station.psk);
-		}
-		return;
-	}
 }
 
 void init_daemon()
@@ -366,12 +349,11 @@ void make_wifi_node()
 
 void update_config(int cdbsock)
 {
-	int ret;
+	struct wifi_config config;
 
-	if ((ret = cdb_start_session(cdbsock, CDB_RUNNING)) != CONFD_OK)
-			confd_fatal("Cannot start session\n");
-	read_config(cdbsock, current_config);
-	apply_config(current_config);
+	ok(cdb_start_session(cdbsock, CDB_RUNNING), "cdb_start_session")
+	read_config(cdbsock, config);
+	apply_config(config);
 	cdb_end_session(cdbsock);
 }
 
@@ -534,7 +516,7 @@ static int action_connect(struct confd_user_info *uinfo __attribute__ ((unused))
 	confd_pp_value(ssid, sizeof(ssid), CONFD_GET_TAG_VALUE(&params[0]));
 	debug("Enter n=%d, ssid=%s", n, ssid);
 
-	new_config.station.ssid = ssid;
+//	new_config.station.ssid = ssid;
 
 	switch (name->tag)
 	{
@@ -602,8 +584,6 @@ int main(int argc, char **argv)
 		int confd_port = CONFD_PORT;
     struct confd_action_cbs acb;
 		int ret;
-
-		print_config("main", current_config);
 
 		// Process command-line options
 		while ((c = getopt(argc, argv, "dta:p:")) != EOF) {
