@@ -76,5 +76,29 @@ module wifi {
         type string;
       }
     }
+
+		tailf:action connect {
+			tailf:actionpoint connect-point;
+			input {
+				list access_point {
+					key ssid;
+
+					leaf ssid {
+						type leafref {
+							path "/scan_results/result/ssid";
+						}
+					}
+				}
+				leaf psk {
+					type string;
+				}
+			}
+			output {
+				leaf status {
+					type string;
+					mandatory true;
+				}
+			}
+		}
   }
 }

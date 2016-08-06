@@ -182,7 +182,6 @@ static void apply_config(struct config& config)
 	}
 }
 
-#if 0
 void write_leaf(int msock, int th, const char *path, string& val)
 {
 	int ret;
@@ -242,7 +241,6 @@ void write_leaf_enum(int msock, int th, const char *path, int val)
 		confd_fatal("maapi_set_elem failed on %s", path);
 	}
 }
-#endif
 
 void init_daemon()
 {
@@ -451,10 +449,60 @@ static int s_finish(struct confd_trans_ctx *tctx)
     return CONFD_OK;
 }
 
+static int init_connect_point(struct confd_user_info *uinfo)
+{
+
+	debug("Enter");
+
+	confd_action_set_fd(uinfo, workersock);
+	return CONFD_OK;
+}
+
+static int action_connect(struct confd_user_info *uinfo __attribute__ ((unused)),
+		struct xml_tag *name __attribute__ ((unused)), confd_hkeypath_t * kp __attribute__ ((unused)),
+		confd_tag_value_t * params __attribute__ ((unused)), int n __attribute__ ((unused)))
+{
+	debug("Enter tag %d", name->tag);
+
+	int rtnval = CONFD_OK;
+	confd_tag_value_t reply;
+	char ssid[256];
+
+	confd_pp_value(ssid, sizeof(ssid), CONFD_GET_TAG_VALUE(&params[0]));
+	debug("Enter n=%d, ssid=%s", n, ssid);
+
+	new_config.station.ssid = ssid;
+
+	switch (name->tag)
+	{
+		case wifi_connect:
+			try
+			{
+				thread(action_thread).detach();
+				string msg("Connecting to ");
+				msg += ssid;
+				CONFD_SET_TAG_STR(reply, wifi_status, msg.c_str());
+			}
+			catch(exception& e)
+			{
+				debug("caught exception %s", e.what());
+				CONFD_SET_TAG_STR(reply, wifi_status, e.what());
+			}
+			confd_action_reply_values(uinfo, reply, 1);
+			break;
+		default:
+			confd_fatal("Got bad operation: %d", name->tag);
+			break;
+	}
+
+	return rtnval;
+}
+
 void register_cbs()
 {
 	struct confd_data_cbs dcb;
 	struct confd_trans_cbs trans;
+	struct confd_action_cbs acb;
 
 	memset(&trans, 0, sizeof (struct confd_trans_cbs));
 	trans.init = s_init;
@@ -468,6 +516,13 @@ void register_cbs()
 	dcb.get_next = get_next;
 	if (confd_register_data_cb(dctx, &dcb) != CONFD_OK)
 		confd_fatal("Failed to register callpoint \"%s\"", dcb.callpoint);
+
+	memset(&acb, 0, sizeof(acb));
+	strcpy(acb.actionpoint, "connect-point");
+	acb.init = init_connect_point;
+	acb.action = action_connect;
+	if (confd_register_action_cbs(dctx, &acb) != CONFD_OK)
+		confd_fatal("Couldn't register action connect-point");
 
 	debug("Registered callpoint");
 }
